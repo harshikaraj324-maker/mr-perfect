@@ -38,6 +38,13 @@ jobs:
           workingDirectory: artifacts/event-bus-worker
           command: deploy
 
+      - name: Set NEON_DATABASE_URL on Pages project
+        run: echo "$NEON_DB" | pnpm dlx wrangler@latest pages secret put NEON_DATABASE_URL --project-name=mr-perfect
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEON_DB: ${{ secrets.NEON_DATABASE_URL }}
+
       - name: Deploy to Cloudflare Pages
         run: pnpm dlx wrangler@latest pages deploy artifacts/dashboard/dist/public --project-name=mr-perfect --branch=main --commit-dirty=true
         env:
