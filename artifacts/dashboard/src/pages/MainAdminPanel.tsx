@@ -142,7 +142,7 @@ function AppCardStats({ appId }: { appId: string }) {
 
   async function handlePingAll() {
     if (pingState === "running" || total === 0) return;
-    const BATCH = 2; const DELAY = 800;
+    const BATCH = 10; const DELAY = 300;
     const updated_at = new Date().toISOString();
     setPingState("running"); setPingDone(0); setPingResult(null);
     let ok = 0; let fail = 0;
