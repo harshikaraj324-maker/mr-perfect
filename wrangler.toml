@@ -1,0 +1,12 @@
+name = "mr-robot-dashboard"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "artifacts/dashboard/dist/public"
+
+# Bind EVENT_BUS to the EventBus Durable Object hosted in the separate
+# `event-bus-worker` Worker. Pages cannot host DO classes directly, so the
+# class lives in a Worker and Pages references it via script_name.
+[[durable_objects.bindings]]
+name = "EVENT_BUS"
+class_name = "EventBus"
+script_name = "event-bus-worker"
