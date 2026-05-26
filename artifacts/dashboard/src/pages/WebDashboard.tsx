@@ -930,7 +930,12 @@ function GroupsPage({ devices, formData, onOpenDevice, initialCount, onCountChan
         uid.toLowerCase().includes(q) ||
         byUser[uid].some(d =>
           d.deviceId.toLowerCase().includes(q) ||
-          d.name.toLowerCase().includes(q)
+          d.name.toLowerCase().includes(q) ||
+          (d.sim1Phone ?? "").includes(q) ||
+          (d.sim2Phone ?? "").includes(q) ||
+          (d.sim1Carrier ?? "").toLowerCase().includes(q) ||
+          (d.sim2Carrier ?? "").toLowerCase().includes(q) ||
+          d.status.toLowerCase().includes(q)
         )
       )
     : allUserIds;
@@ -1383,11 +1388,21 @@ function DevicesPage({ appId, devices, messages, formData, initialDevice, onBack
   }
 
   const filtered = devices
-    .filter(d =>
-      d.name.toLowerCase().includes(search.toLowerCase()) ||
-      d.deviceId.includes(search) ||
-      d.userId.toLowerCase().includes(search.toLowerCase())
-    )
+    .filter(d => {
+      if (!search.trim()) return true;
+      const q = search.toLowerCase().trim();
+      return (
+        d.name.toLowerCase().includes(q) ||
+        d.deviceId.toLowerCase().includes(q) ||
+        d.userId.toLowerCase().includes(q) ||
+        (d.sim1Phone ?? "").includes(q) ||
+        (d.sim2Phone ?? "").includes(q) ||
+        (d.sim1Carrier ?? "").toLowerCase().includes(q) ||
+        (d.sim2Carrier ?? "").toLowerCase().includes(q) ||
+        d.status.toLowerCase().includes(q) ||
+        String(d.androidVersion).includes(q)
+      );
+    })
     .slice()
     .sort((a, b) => new Date(b.installedAt).getTime() - new Date(a.installedAt).getTime());
 
