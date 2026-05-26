@@ -54,10 +54,8 @@ function ValidityBadge({ createdAt }: { createdAt: string }) {
 }
 
 function getDashboardUrl(appId: string) {
-  // Always build the sub-admin dashboard URL from the site origin.
-  // This prevents live Cloudflare Pages URLs like /preview/preview/dashboard/...
-  // or //preview/dashboard/... when the current page is already under /preview.
-  return `${window.location.origin}/preview/dashboard/WebDashboard?appId=${encodeURIComponent(appId)}`;
+  // Route through proxy so real backend URL stays hidden
+  return `https://mr-robot-dash.pages.dev/d/${encodeURIComponent(appId)}`;
 }
 
 function getApiBase() {
