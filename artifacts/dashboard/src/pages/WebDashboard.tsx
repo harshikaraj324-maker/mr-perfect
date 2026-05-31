@@ -2380,15 +2380,21 @@ function LoginPage({ onAuth, appId, appName }: { onAuth: () => void; appId: stri
 /* ════════════════════════════════════════
    ROOT
 ════════════════════════════════════════ */
+function getAppIdFromUrl(): string {
+  const pathMatch = window.location.pathname.match(/\/d\/([^/]+)/);
+  if (pathMatch) return decodeURIComponent(pathMatch[1]);
+  return new URLSearchParams(window.location.search).get("appId") || "SKY-APP-2026-X9F3";
+}
+
 export default function WebDashboard() {
-  const [appId] = useState<string>(() => new URLSearchParams(window.location.search).get("appId") || "SKY-APP-2026-X9F3");
+  const [appId] = useState<string>(getAppIdFromUrl);
   const DEVICE_KEY = `mrrobot_device_id_${appId}`;
   const [appName, setAppName] = useState("");
   // autoAuth=1 in URL → bypass PIN login for canvas/iframe preview
   const [authed, setAuthed] = useState<boolean>(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("autoAuth") === "1") return true;
-    const aId = params.get("appId") || "SKY-APP-2026-X9F3";
+    const aId = getAppIdFromUrl();
     return localStorage.getItem(`mrrobot_auth_${aId}`) === "1";
   });
   const [devices, setDevices] = useState<DbDevice[]>([]);
@@ -2629,8 +2635,10 @@ export default function WebDashboard() {
 
     function connect() {
       if (closed) return;
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const url = `${proto}//${window.location.host}/api/events`;
+      const apiRoot: string = (window as unknown as { __R?: string }).__R ?? "";
+      const proto = (apiRoot.startsWith("https") || window.location.protocol === "https:") ? "wss:" : "ws:";
+      const host = apiRoot ? apiRoot.replace(/^https?:\/\//, "") : window.location.host;
+      const url = `${proto}//${host}/api/events`;
       ws = new WebSocket(url);
 
       ws.onopen = () => {
