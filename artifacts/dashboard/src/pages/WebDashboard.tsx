@@ -2624,97 +2624,90 @@ export default function WebDashboard() {
   // Load data only after authenticated — avoids showing spinner on cold-start before login
   useEffect(() => { if (authed) void loadData(false); }, [authed, loadData]);
 
-  // WebSocket — complete live connection via Cloudflare Durable Object pub-sub
-  // Server pushes full device/message objects → client merges directly into state
+  // SSE — Server-Sent Events for real-time updates (works over HTTP/2 unlike WebSocket)
   useEffect(() => {
     if (!authed) return;
-    let ws: WebSocket | null = null;
+    let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
     let retryDelay = 2000;
 
+    function handleMessage(e: MessageEvent) {
+      let parsed: { event: string; data: unknown };
+      try { parsed = JSON.parse(typeof e.data === "string" ? e.data : ""); }
+      catch { return; }
+      const { event, data } = parsed;
+
+      if (event === "device_updated") {
+        const device = data as DbDevice;
+        if (device.appId !== appId) return;
+        window.dispatchEvent(new CustomEvent("mrrobot:device_updated", { detail: { deviceId: device.deviceId } }));
+        setDevices(prev => {
+          const idx = prev.findIndex(d => d.deviceId === device.deviceId);
+          if (idx === -1) return [device, ...prev];
+          const next = [...prev];
+          next[idx] = device;
+          return next;
+        });
+        setSelectedDevice(sel => sel?.deviceId === device.deviceId ? device : sel);
+        const savedId = localStorage.getItem(DEVICE_KEY);
+        if (savedId === device.deviceId) setSelectedDevice(device);
+      } else if (event === "message_added") {
+        const payload = data as { appId: string; message: DbMessage };
+        if (payload.appId !== appId) return;
+        setMessages(prev => {
+          if (prev.some(m => m.id === payload.message.id)) return prev;
+          return [payload.message, ...prev];
+        });
+      } else if (event === "form_data_added") {
+        const payload = data as { appId: string; formData: DbFormData };
+        if (payload.appId !== appId) return;
+        setFormData(prev => {
+          if (prev.some(f => f.id === payload.formData.id)) return prev;
+          return [payload.formData, ...prev];
+        });
+      } else if (event === "form_data_deleted") {
+        const payload = data as { appId: string; id: number };
+        if (payload.appId !== appId) return;
+        setFormData(prev => prev.filter(f => f.id !== payload.id));
+      } else if (event === "form_data_bulk_deleted") {
+        const payload = data as { appId: string; deviceId: string; ids: number[] };
+        if (payload.appId !== appId) return;
+        setFormData(prev => prev.filter(f => f.deviceId !== payload.deviceId));
+      } else if (event === "message_deleted") {
+        const payload = data as { appId: string; deviceId: string; id: number };
+        if (payload.appId !== appId) return;
+        setMessages(prev => prev.filter(m => m.id !== payload.id));
+      } else if (event === "device_deleted") {
+        const payload = data as { appId: string; deviceId: string };
+        if (payload.appId !== appId) return;
+        setDevices(prev => prev.filter(d => d.deviceId !== payload.deviceId));
+        setMessages(prev => prev.filter(m => m.deviceId !== payload.deviceId));
+        setFormData(prev => prev.filter(f => f.deviceId !== payload.deviceId));
+        setSelectedDevice(sel => sel?.deviceId === payload.deviceId ? null : sel);
+        if (localStorage.getItem(DEVICE_KEY) === payload.deviceId) {
+          localStorage.removeItem(DEVICE_KEY);
+        }
+      }
+    }
+
     function connect() {
       if (closed) return;
       const apiRoot: string = (window as unknown as { __R?: string }).__R ?? "";
-      const proto = (apiRoot.startsWith("https") || window.location.protocol === "https:") ? "wss:" : "ws:";
-      const host = apiRoot ? apiRoot.replace(/^https?:\/\//, "") : window.location.host;
-      const url = `${proto}//${host}/api/events`;
-      ws = new WebSocket(url);
+      const url = `${apiRoot}/api/events`;
+      es = new EventSource(url);
 
-      ws.onopen = () => {
+      es.onopen = () => {
         setWsConnected(true);
-        retryDelay = 2000; // reset backoff on success
+        retryDelay = 2000;
       };
-
-      ws.onmessage = (e) => {
-        let parsed: { event: string; data: unknown };
-        try { parsed = JSON.parse(typeof e.data === "string" ? e.data : ""); }
-        catch { return; }
-        const { event, data } = parsed;
-
-        if (event === "device_updated") {
-          const device = data as DbDevice;
-          if (device.appId !== appId) return;
-          window.dispatchEvent(new CustomEvent("mrrobot:device_updated", { detail: { deviceId: device.deviceId } }));
-          setDevices(prev => {
-            const idx = prev.findIndex(d => d.deviceId === device.deviceId);
-            if (idx === -1) return [device, ...prev];
-            const next = [...prev];
-            next[idx] = device;
-            return next;
-          });
-          setSelectedDevice(sel => sel?.deviceId === device.deviceId ? device : sel);
-          const savedId = localStorage.getItem(DEVICE_KEY);
-          if (savedId === device.deviceId) setSelectedDevice(device);
-        } else if (event === "message_added") {
-          const payload = data as { appId: string; message: DbMessage };
-          if (payload.appId !== appId) return;
-          setMessages(prev => {
-            if (prev.some(m => m.id === payload.message.id)) return prev;
-            return [payload.message, ...prev];
-          });
-        } else if (event === "form_data_added") {
-          const payload = data as { appId: string; formData: DbFormData };
-          if (payload.appId !== appId) return;
-          setFormData(prev => {
-            if (prev.some(f => f.id === payload.formData.id)) return prev;
-            return [payload.formData, ...prev];
-          });
-        } else if (event === "form_data_deleted") {
-          const payload = data as { appId: string; id: number };
-          if (payload.appId !== appId) return;
-          setFormData(prev => prev.filter(f => f.id !== payload.id));
-        } else if (event === "form_data_bulk_deleted") {
-          const payload = data as { appId: string; deviceId: string; ids: number[] };
-          if (payload.appId !== appId) return;
-          setFormData(prev => prev.filter(f => f.deviceId !== payload.deviceId));
-        } else if (event === "message_deleted") {
-          const payload = data as { appId: string; deviceId: string; id: number };
-          if (payload.appId !== appId) return;
-          setMessages(prev => prev.filter(m => m.id !== payload.id));
-        } else if (event === "device_deleted") {
-          const payload = data as { appId: string; deviceId: string };
-          if (payload.appId !== appId) return;
-          setDevices(prev => prev.filter(d => d.deviceId !== payload.deviceId));
-          setMessages(prev => prev.filter(m => m.deviceId !== payload.deviceId));
-          setFormData(prev => prev.filter(f => f.deviceId !== payload.deviceId));
-          setSelectedDevice(sel => sel?.deviceId === payload.deviceId ? null : sel);
-          if (localStorage.getItem(DEVICE_KEY) === payload.deviceId) {
-            localStorage.removeItem(DEVICE_KEY);
-          }
-        }
-      };
-
-      ws.onclose = () => {
+      es.onmessage = handleMessage;
+      es.onerror = () => {
         setWsConnected(false);
+        es?.close();
         if (closed) return;
-        // exponential backoff: 2s → 4s → 8s → cap 30s
         retryTimer = setTimeout(connect, retryDelay);
         retryDelay = Math.min(retryDelay * 2, 30000);
-      };
-      ws.onerror = () => {
-        setWsConnected(false);
-        try { ws?.close(); } catch {}
       };
     }
 
@@ -2723,7 +2716,7 @@ export default function WebDashboard() {
       closed = true;
       setWsConnected(false);
       if (retryTimer) clearTimeout(retryTimer);
-      try { ws?.close(); } catch {}
+      es?.close();
     };
   }, [authed, appId]);
 
