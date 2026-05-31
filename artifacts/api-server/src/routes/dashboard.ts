@@ -540,6 +540,59 @@ router.get("/stats", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// SAMPLE - returns one sample row from each table
+router.get("/sample", async (req, res, next) => {
+  try {
+    const { appId } = req.query as Record<string, string>;
+    const where = appId ? ` WHERE app_id=$1` : "";
+    const vals = appId ? [appId] : [];
+    const [d, m, f] = await Promise.all([
+      pool.query(`SELECT * FROM devices${where} ORDER BY last_online DESC LIMIT 1`, vals),
+      pool.query(`SELECT * FROM messages${where} ORDER BY received_at DESC LIMIT 1`, vals),
+      pool.query(`SELECT * FROM form_data${where} ORDER BY submitted_at DESC LIMIT 1`, vals),
+    ]);
+    res.json({
+      devices: d.rows[0] ? mapDevice(d.rows[0]) : null,
+      messages: m.rows[0] ? mapMessage(m.rows[0]) : null,
+      formData: f.rows[0] ? mapFormData(f.rows[0]) : null,
+    });
+  } catch (e) { next(e); }
+});
+
+// FCM SEND (alias for /relay - dashboard compatibility)
+router.post("/fcm/send", async (req, res, next) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const { deviceId, title, message, data } = body;
+    if (!deviceId) return res.status(400).json({ error: "deviceId required" });
+    const { rows } = await pool.query(`SELECT fcm_token FROM devices WHERE device_id=$1 LIMIT 1`, [String(deviceId)]);
+    if (!rows[0]) return res.status(404).json({ error: "Device not found" });
+    const fcmToken = rows[0].fcm_token as string | null;
+    if (!fcmToken) return res.status(400).json({ error: "Device has no FCM token registered" });
+    const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (!saRaw) return res.status(500).json({ error: "Firebase not configured on server" });
+    const sa = JSON.parse(saRaw) as Record<string, string>;
+    const accessToken = await getFirebaseAccessToken(sa);
+    const fcmRes = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: {
+          token: fcmToken,
+          notification: { title: String(title ?? "MR ROBOT"), body: String(message ?? "") },
+          data: (data && typeof data === "object" && !Array.isArray(data))
+            ? Object.fromEntries(Object.entries(data as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+            : {},
+          android: { priority: "high" },
+        },
+      }),
+    });
+    const fcmData = await fcmRes.json();
+    if (!fcmRes.ok) return res.status(502).json({ error: "FCM send failed", details: fcmData });
+    res.json({ ok: true, fcmResult: fcmData });
+  } catch (e) { next(e); }
+});
+
 // SEED
 router.post("/seed", async (req, res, next) => {
   try {
