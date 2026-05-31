@@ -1,5 +1,8 @@
 import { Router, type IRouter } from "express";
-import { pool } from "@workspace/db";
+import pg from "pg";
+
+const { Pool } = pg;
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const router: IRouter = Router();
 
