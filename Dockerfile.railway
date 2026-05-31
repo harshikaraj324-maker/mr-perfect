@@ -4,13 +4,12 @@ WORKDIR /app
 
 RUN npm install -g pnpm@9
 
-COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY pnpm-workspace.yaml package.json ./
 COPY tsconfig.base.json tsconfig.json ./
-COPY lib/ ./lib/
 COPY scripts/ ./scripts/
 COPY artifacts/api-server/ ./artifacts/api-server/
 
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --no-frozen-lockfile --filter @workspace/api-server...
 
 RUN pnpm --filter @workspace/api-server run build
 
@@ -19,4 +18,4 @@ EXPOSE 8080
 ENV PORT=8080
 ENV NODE_ENV=production
 
-CMD ["pnpm", "--filter", "@workspace/api-server", "run", "start"]
+CMD ["node", "--enable-source-maps", "/app/artifacts/api-server/dist/index.mjs"]
