@@ -8,7 +8,7 @@ COPY pnpm-workspace.yaml package.json ./
 COPY tsconfig.base.json tsconfig.json ./
 COPY scripts/ ./scripts/
 COPY artifacts/api-server/ ./artifacts/api-server/
-COPY dashboard-dist/ ./public/
+COPY dashboard-dist/ ./artifacts/api-server/public/
 
 RUN pnpm install --no-frozen-lockfile --filter @workspace/api-server...
 
