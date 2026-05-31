@@ -8,8 +8,12 @@ COPY pnpm-workspace.yaml package.json ./
 COPY tsconfig.base.json tsconfig.json ./
 COPY scripts/ ./scripts/
 COPY artifacts/api-server/ ./artifacts/api-server/
+COPY artifacts/dashboard/ ./artifacts/dashboard/
 
-RUN pnpm install --no-frozen-lockfile --filter @workspace/api-server...
+RUN pnpm install --no-frozen-lockfile --filter @workspace/api-server... --filter @workspace/dashboard...
+
+RUN pnpm --filter @workspace/dashboard run build && \
+    cp -r /app/artifacts/dashboard/dist/public /app/public
 
 RUN pnpm --filter @workspace/api-server run build
 
