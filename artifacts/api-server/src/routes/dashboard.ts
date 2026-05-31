@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import pg from "pg";
 import { createSign } from "crypto";
-import { broadcast } from "../lib/wsEmitter";
+import { broadcast } from "../lib/sseEmitter";
 
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
