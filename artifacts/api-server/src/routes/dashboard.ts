@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import pg from "pg";
 import { createSign } from "crypto";
+import { broadcast } from "../lib/wsEmitter";
 
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -277,7 +278,9 @@ router.patch("/devices/:deviceId", async (req, res, next) => {
     vals.push(req.params.deviceId);
     const { rows } = await pool.query(`UPDATE devices SET ${sets.join(",")} WHERE device_id=$${vals.length} RETURNING *`, vals);
     if (!rows[0]) return res.status(404).json({ error: "Device not found" });
-    res.json(mapDevice(rows[0]));
+    const updated = mapDevice(rows[0]);
+    broadcast("device_updated", updated);
+    res.json(updated);
   } catch (e) { next(e); }
 });
 
@@ -326,6 +329,7 @@ router.post("/messages", async (req, res, next) => {
         String(body.fromNumber), body.toNumber ? String(body.toNumber) : null,
         String(body.body), Boolean(body.isSensitive ?? false)],
     );
+    broadcast("message_added", { appId: String(body.appId), message: mapMessage(rows[0]) });
     res.status(201).json({ ok: true, id: rows[0].id });
   } catch (e) { next(e); }
 });
@@ -363,7 +367,9 @@ router.post("/data", async (req, res, next) => {
       `INSERT INTO form_data (app_id,device_id,data) VALUES ($1,$2,$3) RETURNING *`,
       [String(appId), String(deviceId), JSON.stringify(data)],
     );
-    res.status(201).json(mapFormData(rows[0]));
+    const fd = mapFormData(rows[0]);
+    broadcast("form_data_added", { appId: String(appId), formData: fd });
+    res.status(201).json(fd);
   } catch (e) { next(e); }
 });
 
