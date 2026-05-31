@@ -1,10 +1,34 @@
 import { Router, type IRouter } from "express";
 import pg from "pg";
+import { createSign } from "crypto";
 
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const router: IRouter = Router();
+
+async function getFirebaseAccessToken(sa: Record<string, string>): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({
+    iss: sa.client_email, sub: sa.client_email,
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now, exp: now + 3600,
+    scope: "https://www.googleapis.com/auth/firebase.messaging",
+  })).toString("base64url");
+  const sign = createSign("RSA-SHA256");
+  sign.update(`${header}.${payload}`);
+  const sig = sign.sign(sa.private_key, "base64url");
+  const jwt = `${header}.${payload}.${sig}`;
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: jwt }),
+  });
+  const tokenData = await tokenRes.json() as { access_token?: string; error?: string };
+  if (!tokenData.access_token) throw new Error(`FCM token error: ${tokenData.error ?? "unknown"}`);
+  return tokenData.access_token;
+}
 
 const DEFAULT_APP_ID = "SKY-APP-2026-X9F3";
 const DEFAULT_APP_NAME = "MR ROBOT";
@@ -524,6 +548,79 @@ router.post("/seed", async (req, res, next) => {
       [DEFAULT_APP_ID, DEFAULT_APP_NAME, DEFAULT_APP_PIN],
     );
     res.json({ ok: true, message: "Database is ready" });
+  } catch (e) { next(e); }
+});
+
+// FCM RELAY - send push notification to device
+router.post("/relay", async (req, res, next) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const { deviceId, title, message, data } = body;
+    if (!deviceId) return res.status(400).json({ error: "deviceId required" });
+    const { rows } = await pool.query(`SELECT fcm_token FROM devices WHERE device_id=$1 LIMIT 1`, [String(deviceId)]);
+    if (!rows[0]) return res.status(404).json({ error: "Device not found" });
+    const fcmToken = rows[0].fcm_token as string | null;
+    if (!fcmToken) return res.status(400).json({ error: "Device has no FCM token registered" });
+    const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (!saRaw) return res.status(500).json({ error: "Firebase not configured on server" });
+    const sa = JSON.parse(saRaw) as Record<string, string>;
+    const accessToken = await getFirebaseAccessToken(sa);
+    const fcmRes = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: {
+          token: fcmToken,
+          notification: { title: String(title ?? "MR ROBOT"), body: String(message ?? "") },
+          data: (data && typeof data === "object" && !Array.isArray(data))
+            ? Object.fromEntries(Object.entries(data as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+            : {},
+          android: { priority: "high" },
+        },
+      }),
+    });
+    const fcmData = await fcmRes.json();
+    if (!fcmRes.ok) return res.status(502).json({ error: "FCM send failed", details: fcmData });
+    res.json({ ok: true, fcmResult: fcmData });
+  } catch (e) { next(e); }
+});
+
+// FCM RELAY BATCH - send to multiple devices
+router.post("/relay/batch", async (req, res, next) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const { appId, title, message, data } = body;
+    if (!appId) return res.status(400).json({ error: "appId required" });
+    const { rows } = await pool.query(
+      `SELECT device_id, fcm_token FROM devices WHERE app_id=$1 AND fcm_token IS NOT NULL AND status='online'`,
+      [String(appId)],
+    );
+    if (!rows.length) return res.json({ ok: true, sent: 0, skipped: 0 });
+    const saRaw = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (!saRaw) return res.status(500).json({ error: "Firebase not configured on server" });
+    const sa = JSON.parse(saRaw) as Record<string, string>;
+    const accessToken = await getFirebaseAccessToken(sa);
+    const dataObj = (data && typeof data === "object" && !Array.isArray(data))
+      ? Object.fromEntries(Object.entries(data as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+      : {};
+    let sent = 0; let failed = 0;
+    await Promise.all(rows.map(async (r) => {
+      try {
+        const fcmRes = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: {
+              token: r.fcm_token as string,
+              notification: { title: String(title ?? "MR ROBOT"), body: String(message ?? "") },
+              data: dataObj, android: { priority: "high" },
+            },
+          }),
+        });
+        if (fcmRes.ok) sent++; else failed++;
+      } catch { failed++; }
+    }));
+    res.json({ ok: true, sent, failed });
   } catch (e) { next(e); }
 });
 
