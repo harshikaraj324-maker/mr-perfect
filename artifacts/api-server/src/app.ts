@@ -36,7 +36,7 @@ app.use("/api", router);
 const staticDir = join(process.cwd(), "public");
 if (existsSync(staticDir)) {
   app.use(express.static(staticDir));
-  app.get("*", (_req, res) => {
+  app.use((_req, res) => {
     res.sendFile(join(staticDir, "index.html"));
   });
 }
